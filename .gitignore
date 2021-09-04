@@ -1,0 +1,6 @@
+/bin/*
+/.vs/*
+*.user
+/DX12/Model/*
+/DX12/Motion/*
+/Dx12/toon/*
