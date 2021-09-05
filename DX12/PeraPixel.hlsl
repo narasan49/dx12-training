@@ -113,6 +113,11 @@ float4 ps(Output input) : SV_TARGET
 		{
 			return texShrink.Sample(smp, input.uv * 5);
 		}
+		else if (input.uv.y < 0.4)
+		{
+			float s = texSsao.Sample(smp, (input.uv - float2(0, 0.2)) * 5);
+			return float4(s, s, s, 1);
+		}
 	}
 
 	float4 color = tex.Sample(smp, input.uv);
@@ -127,7 +132,9 @@ float4 ps(Output input) : SV_TARGET
 	//float4 bloom = blur(texHighLum, smp, input.uv, dx, dy);
 	float4 bloomAccumulated = blurByShrinkTex(texShrinkHighLum, smp, input.uv);
 
-	return saturate(bloomAccumulated) + dofFilter(input.uv);
+	float ssao = texSsao.Sample(smp, input.uv);
+
+	return (saturate(bloomAccumulated) + dofFilter(input.uv)) * ssao;
 }
 
 BlurOutput BlurPS(Output input) : SV_TARGET

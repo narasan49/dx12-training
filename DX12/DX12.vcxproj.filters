@@ -47,6 +47,7 @@
     <FxCompile Include="Fluid2DVS.hlsl" />
     <FxCompile Include="PeraVertex.hlsl" />
     <FxCompile Include="PeraPixel.hlsl" />
+    <FxCompile Include="SsaoPixelShader.hlsl" />
   </ItemGroup>
   <ItemGroup>
     <None Include="BasicShaderHeader.hlsli" />

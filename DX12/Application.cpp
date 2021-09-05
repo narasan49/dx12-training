@@ -137,6 +137,8 @@ void Application::Run()
 		// 縮小バッファ
 		mDX12->DrawShrinkTextureForBlur();
 
+		mDX12->DrawSsao();
+
 		// バックバッファへの描画準備
 		mDX12->BeginDraw();
 		// 
@@ -145,4 +147,9 @@ void Application::Run()
 
 		mDX12->getSwapChain()->Present(1, 0);
 	}
+}
+
+Size Application::GetWindowSize()
+{
+	return Size(WINDOW_WIDTH, WINDOW_HEIGHT);
 }

@@ -7,6 +7,7 @@ struct SceneMatrix {
 	//XMMATRIX world;
 	XMMATRIX view;
 	XMMATRIX proj;
+	XMMATRIX invproj;
 	XMMATRIX lightCamera; // ライトから見たビュー
 	XMMATRIX shadow;
 	XMFLOAT3 eye;
@@ -64,8 +65,11 @@ public:
 	ComPtr<ID3D12Resource> CreateGrayGradationTexture();
 
 	HRESULT CreateSsaoBuffer();
+	HRESULT CreateSsaoRtvAndSrv();
 	void DrawSsao();
 private:
+	void Barrier(ComPtr<ID3D12Resource> pResource, D3D12_RESOURCE_STATES stateBefore, D3D12_RESOURCE_STATES stateAfter);
+
 	RECT mWindowRect;
 	ComPtr<ID3D12Device> mDev = nullptr;
 	ComPtr<IDXGIFactory6> mDxgiFactory = nullptr;
@@ -142,4 +146,6 @@ private:
 	// SSAO
 	ComPtr<ID3D12Resource> mSsaoBuffer;
 	ComPtr<ID3D12PipelineState> mSsaoPipeline;
+	ComPtr<ID3D12DescriptorHeap> mSsaoRtvHeap;
+	ComPtr<ID3D12DescriptorHeap> mSsaoSrvHeap;
 };

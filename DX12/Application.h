@@ -23,6 +23,16 @@ class DX12;
 class PMDRenderer;
 class PMDActor;
 
+struct Size
+{
+	int Width;
+	int Height;
+	Size() {}
+	Size(int width, int height)
+		: Width(width), Height(height)
+	{}
+};
+
 class Application
 {
 public:
@@ -34,6 +44,8 @@ public:
 	//void Termiante();
 
 	~Application() {}
+	Size GetWindowSize();
+
 private:
 	Application() {}
 

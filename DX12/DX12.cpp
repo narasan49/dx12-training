@@ -1,6 +1,7 @@
 #include "stdafx.h"
 #include "DX12.h"
 #include "PMDUtil.h"
+#include "Application.h"
 
 #include <tchar.h>
 #include <iostream>
@@ -117,6 +118,10 @@ void DX12::DrawPera()
 
 	mCmdList->SetDescriptorHeaps(1, mDepthSrvHeap.GetAddressOf());
 	mCmdList->SetGraphicsRootDescriptorTable(1, mDepthSrvHeap->GetGPUDescriptorHandleForHeapStart());
+
+	// ssao テクスチャ
+	mCmdList->SetDescriptorHeaps(1, mSsaoSrvHeap.GetAddressOf());
+	mCmdList->SetGraphicsRootDescriptorTable(2, mSsaoSrvHeap->GetGPUDescriptorHandleForHeapStart());
 
 	mCmdList->IASetVertexBuffers(0, 1, &mPeraVBView);
 	mCmdList->DrawInstanced(4, 1, 0, 0);
@@ -354,6 +359,18 @@ HRESULT DX12::Init(HWND hwnd)
 	if (FAILED(result))
 	{
 		cout << "Create Depth SRV Failed." << endl;
+		return result;
+	}
+	result = CreateSsaoBuffer();
+	if (FAILED(result))
+	{
+		cout << "Create SSAO buffer Failed." << endl;
+		return result;
+	}
+	result = CreateSsaoRtvAndSrv();
+	if (FAILED(result))
+	{
+		cout << "Create SSAO RTV and SRV Failed." << endl;
 		return result;
 	}
 	result = CreateSceneView();
@@ -677,6 +694,8 @@ HRESULT DX12::CreateSceneView()
 	mSceneMatrix.eye = eye;
 	mSceneMatrix.view = viewMatrix;
 	mSceneMatrix.proj = projMatrix;
+	XMVECTOR det;
+	mSceneMatrix.invproj = XMMatrixInverse(&det, mSceneMatrix.proj);
 
 	//行列用定数バッファ作成
 	//ID3D12Resource* constBuff = nullptr;
@@ -1015,27 +1034,58 @@ HRESULT DX12::CreateGraphicsPipeline()
 
 	result = mDev->CreateGraphicsPipelineState(&gPipelineDesc, IID_PPV_ARGS(mBlurPipeline.ReleaseAndGetAddressOf()));
 
+	// SSAO用パイプライン
+	result = D3DCompileFromFile(
+		L"SsaoPixelShader.hlsl",
+		nullptr,
+		D3D_COMPILE_STANDARD_FILE_INCLUDE,
+		"SsaoPs",
+		"ps_5_0",
+		0,
+		0,
+		ps.ReleaseAndGetAddressOf(),
+		errorBlob.ReleaseAndGetAddressOf()
+	);
 
+	if (FAILED(result))
+	{
+		cout << "Compile ssao pixel shader failed" << endl;
+	}
+
+	gPipelineDesc.NumRenderTargets = 1;
+	gPipelineDesc.RTVFormats[0] = DXGI_FORMAT_R32_FLOAT;
+	gPipelineDesc.RTVFormats[1] = DXGI_FORMAT_UNKNOWN;
+	gPipelineDesc.BlendState.RenderTarget[0].BlendEnable = false;
+	gPipelineDesc.PS = CD3DX12_SHADER_BYTECODE(ps.Get());
+	result = mDev->CreateGraphicsPipelineState(&gPipelineDesc, IID_PPV_ARGS(mSsaoPipeline.ReleaseAndGetAddressOf()));
+	if (FAILED(result))
+	{
+		cout << "Create SSAO Pipeline Failed" << endl;
+	}
 
 	return result;
 }
 
 HRESULT DX12::CreateRootSignature()
 {
-	CD3DX12_DESCRIPTOR_RANGE range[2] = {};
+	CD3DX12_DESCRIPTOR_RANGE range[4] = {};
 	// 通常の色、法線、高輝度、高輝度縮小、通常縮小
 	range[0].Init(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 5, 0);
 	// 深度値テクスチャ用
 	range[1].Init(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 2, 5);
+	range[2].Init(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 1, 7);
+	range[3].Init(D3D12_DESCRIPTOR_RANGE_TYPE_CBV, 1, 0);
 
-	CD3DX12_ROOT_PARAMETER rootParam[2] = {};
+	CD3DX12_ROOT_PARAMETER rootParam[4] = {};
 	rootParam[0].InitAsDescriptorTable(1, &range[0], D3D12_SHADER_VISIBILITY_PIXEL);
 	rootParam[1].InitAsDescriptorTable(1, &range[1], D3D12_SHADER_VISIBILITY_PIXEL);
+	rootParam[2].InitAsDescriptorTable(1, &range[2], D3D12_SHADER_VISIBILITY_PIXEL);
+	rootParam[3].InitAsDescriptorTable(1, &range[3], D3D12_SHADER_VISIBILITY_PIXEL);
 
 	D3D12_STATIC_SAMPLER_DESC sampler = CD3DX12_STATIC_SAMPLER_DESC(0);
 
 	D3D12_ROOT_SIGNATURE_DESC rootSigDesc = {};
-	rootSigDesc.NumParameters = 2;
+	rootSigDesc.NumParameters = 4;
 	rootSigDesc.pParameters = rootParam;
 	rootSigDesc.NumStaticSamplers = 1;
 	rootSigDesc.pStaticSamplers = &sampler;
@@ -1287,7 +1337,7 @@ HRESULT DX12::CreateCommittedResource(D3D12_HEAP_TYPE type)
 
 HRESULT DX12::CreateSsaoBuffer()
 {
-	auto& backBuf = mBackBuffers[0];
+	auto backBuf = mBackBuffers[0];
 	auto resDesc = backBuf->GetDesc();
 	resDesc.Format = DXGI_FORMAT_R32_FLOAT;
 
@@ -1296,11 +1346,111 @@ HRESULT DX12::CreateSsaoBuffer()
 	auto clearValue = CD3DX12_CLEAR_VALUE(resDesc.Format, clearColor);
 
 	HRESULT result = S_OK;
+	result = mDev->CreateCommittedResource(
+		&heapProp,
+		D3D12_HEAP_FLAG_NONE,
+		&resDesc,
+		D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE,
+		&clearValue,
+		IID_PPV_ARGS(mSsaoBuffer.ReleaseAndGetAddressOf())
+	);
+
+	if (FAILED(result))
+	{
+		assert(0 && __FUNCTION__);
+		return result;
+	}
+
+	return result;
+}
+
+HRESULT DX12::CreateSsaoRtvAndSrv()
+{
+	HRESULT result = S_OK;
+	// RTVヒープ
+	D3D12_DESCRIPTOR_HEAP_DESC desc = {};
+	desc.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_NONE;
+	desc.NodeMask = 0;
+	desc.NumDescriptors = 1;
+	desc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_RTV;
+
+	result = mDev->CreateDescriptorHeap(&desc, IID_PPV_ARGS(mSsaoRtvHeap.ReleaseAndGetAddressOf()));
+	if (FAILED(result))
+	{
+		cout << "create SSAO RTV heap failed." << endl;
+		return result;
+	}
+
+	// RTV作成
+	D3D12_RENDER_TARGET_VIEW_DESC rtvDesc = {};
+	rtvDesc.ViewDimension = D3D12_RTV_DIMENSION_TEXTURE2D;
+	rtvDesc.Format = DXGI_FORMAT_R32_FLOAT;
+	mDev->CreateRenderTargetView(mSsaoBuffer.Get(), &rtvDesc, mSsaoRtvHeap->GetCPUDescriptorHandleForHeapStart());
+
+	// SRVヒープ
+	desc.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE;
+	desc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV;
+	result = mDev->CreateDescriptorHeap(&desc, IID_PPV_ARGS(mSsaoSrvHeap.ReleaseAndGetAddressOf()));
+	if (FAILED(result))
+	{
+		cout << "create SSAO SRV heap failed." << endl;
+		return result;
+	}
+
+	D3D12_SHADER_RESOURCE_VIEW_DESC srvDesc = {};
+	srvDesc.Format = DXGI_FORMAT_R32_FLOAT;
+	srvDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+	srvDesc.Texture2D.MipLevels = 1;
+	srvDesc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
+	mDev->CreateShaderResourceView(mSsaoBuffer.Get(), &srvDesc, mSsaoSrvHeap->GetCPUDescriptorHandleForHeapStart());
 
 	return result;
 }
 
 void DX12::DrawSsao()
 {
+	Barrier(mSsaoBuffer, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE, D3D12_RESOURCE_STATE_RENDER_TARGET);
+	
+	auto rtvBaseHandle = mSsaoRtvHeap->GetCPUDescriptorHandleForHeapStart();
+	mCmdList->OMSetRenderTargets(1, &rtvBaseHandle, false, nullptr);
+	mCmdList->SetGraphicsRootSignature(mPeraRootSignature.Get());
+	
+	auto windowSize = Application::Instance().GetWindowSize();
+	auto viewport = CD3DX12_VIEWPORT(0.0, 0.0, windowSize.Width, windowSize.Height);
+	mCmdList->RSSetViewports(1, mViewport.get());
 
+	CD3DX12_RECT rect(0, 0, windowSize.Width, windowSize.Height);
+	mCmdList->RSSetScissorRects(1, mScissorRect.get());
+
+
+	mCmdList->SetDescriptorHeaps(1, mPeraSRVHeap.GetAddressOf());
+	// 法線テクスチャをセットする
+	auto srvHandle = mPeraSRVHeap->GetGPUDescriptorHandleForHeapStart();
+	mCmdList->SetGraphicsRootDescriptorTable(0, srvHandle);
+
+	// 深度テクスチャのセット
+	mCmdList->SetDescriptorHeaps(1, mDepthSrvHeap.GetAddressOf());
+	auto depthSrvHandle = mDepthSrvHeap->GetGPUDescriptorHandleForHeapStart();
+	mCmdList->SetGraphicsRootDescriptorTable(1, depthSrvHandle);
+
+	//　シーン情報のセット
+	mCmdList->SetDescriptorHeaps(1, mSceneDescHeap.GetAddressOf());
+	auto sceneHandle = mSceneDescHeap->GetGPUDescriptorHandleForHeapStart();
+	mCmdList->SetGraphicsRootDescriptorTable(3, sceneHandle);
+
+	mCmdList->SetPipelineState(mSsaoPipeline.Get());
+	mCmdList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLESTRIP);
+
+	mCmdList->IASetVertexBuffers(0, 1, &mPeraVBView);
+	mCmdList->DrawInstanced(4, 1, 0, 0);
+
+	Barrier(mSsaoBuffer, D3D12_RESOURCE_STATE_RENDER_TARGET, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
+}
+
+void DX12::Barrier(ComPtr<ID3D12Resource> pResource, D3D12_RESOURCE_STATES stateBefore, D3D12_RESOURCE_STATES stateAfter)
+{
+	auto resBarrier = CD3DX12_RESOURCE_BARRIER::Transition(
+		pResource.Get(), stateBefore, stateAfter
+	);
+	mCmdList->ResourceBarrier(1, &resBarrier);
 }
