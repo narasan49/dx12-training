@@ -19,3 +19,5 @@
 #pragma comment(lib, "dxgi.lib")
 #pragma comment(lib, "d3dcompiler.lib")
 #pragma comment(lib, "DirectXTex.lib")
+
+#include "imgui/stdafx.h"
